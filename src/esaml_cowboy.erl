@@ -52,20 +52,18 @@ reply_with_logoutresp(SP, IDP, Status, RelayState, Req) ->
 %% @private
 reply_with_req(IDP, SignedXml, RelayState, Req) ->
     Target = esaml_binding:encode_http_redirect(IDP, SignedXml, RelayState),
-    {UA, _} = cowboy_req:header(<<"user-agent">>, Req, <<"">>),
+    UA = cowboy_req:header(<<"user-agent">>, Req, <<"">>),
     IsIE = not (binary:match(UA, <<"MSIE">>) =:= nomatch),
     if IsIE andalso (byte_size(Target) > 2042) ->
         Html = esaml_binding:encode_http_post(IDP, SignedXml, RelayState),
-        cowboy_req:reply(200, [
-            {<<"Cache-Control">>, <<"no-cache">>},
-            {<<"Pragma">>, <<"no-cache">>}
-        ], Html, Req);
+        cowboy_req:reply(200, #{<<"Cache-Control">> => <<"no-cache">>
+                               , <<"Pragma">> => <<"no-cache">>
+                               }, Html, Req);
     true ->
-        cowboy_req:reply(302, [
-            {<<"Cache-Control">>, <<"no-cache">>},
-            {<<"Pragma">>, <<"no-cache">>},
-            {<<"Location">>, Target}
-        ], <<"Redirecting...">>, Req)
+        cowboy_req:reply(302, #{<<"Cache-Control">> => <<"no-cache">>
+                               , <<"Pragma">> => <<"no-cache">>
+                               , <<"Location">> => Target}
+                               , <<"Redirecting...">>, Req)
     end.
 
 %% @doc Validate and parse a LogoutRequest or LogoutResponse
@@ -75,34 +73,22 @@ reply_with_req(IDP, SignedXml, RelayState, Req) ->
         {request, esaml:logoutreq(), RelayState::binary(), Req} |
         {response, esaml:logoutresp(), RelayState::binary(), Req} |
         {error, Reason :: term(), Req}.
-validate_logout(SP, Req) ->
-    {Method, Req} = cowboy_req:method(Req),
+validate_logout(SP, #{method := Method} = Req) ->
     case Method of
         <<"POST">> ->
-            % XXX: compat hack, the cowboy_req:continue/1 function was introduced at the
-            %      same time as the API change on body_qs/2, so we can use it to detect
-            %      which argument layout we need to use. this way we can be compat with
-            %      both cowboy <1.0 and 1.0.x.
-            {ok, PostVals, Req2} = case erlang:function_exported(cowboy_req, continue, 1) of
-                true -> cowboy_req:body_qs(Req, [{length, 128000}]);
-                false -> cowboy_req:body_qs(128000, Req)
-            end,
+            {ok, PostVals, Req2} = cowboy_req:read_urlencoded_body(Req),
             SAMLEncoding = proplists:get_value(<<"SAMLEncoding">>, PostVals),
             SAMLResponse = proplists:get_value(<<"SAMLResponse">>, PostVals,
                 proplists:get_value(<<"SAMLRequest">>, PostVals)),
             RelayState = proplists:get_value(<<"RelayState">>, PostVals, <<>>),
             validate_logout(SP, SAMLEncoding, SAMLResponse, RelayState, Req2);
         <<"GET">> ->
-            {SAMLEncoding, Req2} = cowboy_req:qs_val(<<"SAMLEncoding">>, Req),
-            {SAMLResponse, Req2} = case cowboy_req:qs_val(<<"SAMLResponse">>, Req2) of
-                {undefined, Req2} -> cowboy_req:qs_val(<<"SAMLRequest">>, Req2);
-                Other -> Other
-            end,
-            RelayState = case cowboy_req:qs_val(<<"RelayState">>, Req2) of
-                {undefined, Req2} -> <<>>;
-                {B, Req2} -> B
-            end,
-            validate_logout(SP, SAMLEncoding, SAMLResponse, RelayState, Req2)
+            SAMLEncoding = cowboy_req:match_qs([{'SAMLEncoding', []}], Req),
+            SAMLResponse = cowboy_req:match_qs([{ 'SAMLResponse'
+                                                , []
+                                                , cowboy_req:match_qs([{ 'SAMLRequest', []}], Req)}], Req),
+            RelayState = cowboy_req:match_qs([{'RelayState', [], <<>>}], Req),
+            validate_logout(SP, SAMLEncoding, SAMLResponse, RelayState, Req)
     end.
 
 %% @private
@@ -132,7 +118,7 @@ validate_logout(SP, SAMLEncoding, SAMLResponse, RelayState, Req2) ->
 reply_with_metadata(SP, Req) ->
     SignedXml = SP:generate_metadata(),
     Metadata = xmerl:export([SignedXml], xmerl_xml),
-    cowboy_req:reply(200, [{<<"Content-Type">>, <<"text/xml">>}], Metadata, Req).
+    cowboy_req:reply(200, #{<<"Content-Type">> => <<"text/xml">>}, Metadata, Req).
 
 %% @doc Validate and parse an Assertion inside a SAMLResponse
 %%
@@ -152,11 +138,7 @@ validate_assertion(SP, Req) ->
         {ok, esaml:assertion(), RelayState :: binary(), Req} |
         {error, Reason :: term(), Req}.
 validate_assertion(SP, DuplicateFun, Req) ->
-    % XXX: compat hack, see first version above for explanation
-    {ok, PostVals, Req2} = case erlang:function_exported(cowboy_req, continue, 1) of
-        true -> cowboy_req:body_qs(Req, [{length, 128000}]);
-        false -> cowboy_req:body_qs(128000, Req)
-    end,
+    {ok, PostVals, Req2} = cowboy_req:read_urlencoded_body(Req),
     SAMLEncoding = proplists:get_value(<<"SAMLEncoding">>, PostVals),
     SAMLResponse = proplists:get_value(<<"SAMLResponse">>, PostVals),
     RelayState = proplists:get_value(<<"RelayState">>, PostVals),

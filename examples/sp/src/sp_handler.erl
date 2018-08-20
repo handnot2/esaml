@@ -43,10 +43,9 @@ init(_Transport, Req, _Args) ->
 
     {ok, Req, #state{sp = SP, idp = IdpMeta}}.
 
-handle(Req, S = #state{}) ->
-    {Operation, Req2} = cowboy_req:binding(operation, Req),
-    {Method, Req3} = cowboy_req:method(Req2),
-    handle(Method, Operation, Req3, S).
+handle(#{method := Method} = Req, S = #state{}) ->
+    Operation = cowboy_req:binding(operation, Req),
+    handle(Method, Operation, Req, S).
 
 % Return our SP metadata as signed XML
 handle(<<"GET">>, <<"metadata">>, Req, S = #state{sp = SP}) ->
@@ -67,18 +66,18 @@ handle(<<"POST">>, <<"consume">>, Req, S = #state{sp = SP}) ->
             Attrs = Assertion#esaml_assertion.attributes,
             Uid = proplists:get_value(uid, Attrs),
             Output = io_lib:format("<html><head><title>SAML SP demo</title></head><body><h1>Hi there!</h1><p>This is the <code>esaml_sp_default</code> demo SP callback module from eSAML.</p><table><tr><td>Your name:</td><td>\n~p\n</td></tr><tr><td>Your UID:</td><td>\n~p\n</td></tr></table><hr /><p>RelayState:</p><pre>\n~p\n</pre><p>The assertion I got was:</p><pre>\n~p\n</pre></body></html>", [Assertion#esaml_assertion.subject#esaml_subject.name, Uid, RelayState, Assertion]),
-            {ok, Req3} = cowboy_req:reply(200, [{<<"Content-Type">>, <<"text/html">>}], Output, Req2),
+            Req3 = cowboy_req:reply(200, #{<<"Content-Type">> => <<"text/html">>}, Output, Req2),
             {ok, Req3, S};
 
         {error, Reason, Req2} ->
-            {ok, Req3} = cowboy_req:reply(403, [{<<"content-type">>, <<"text/plain">>}],
+            Req3 = cowboy_req:reply(403, #{<<"content-type">> => <<"text/plain">>},
                 ["Access denied, assertion failed validation:\n", io_lib:format("~p\n", [Reason])],
                 Req2),
             {ok, Req3, S}
     end;
 
 handle(_, _, Req, S = #state{}) ->
-    {ok, Req2} = cowboy_req:reply(404, [], <<"Not found">>, Req),
+    Req2 = cowboy_req:reply(404, #{}, <<"Not found">>, Req),
     {ok, Req2, S}.
 
 terminate(_Reason, _Req, _State) -> ok.

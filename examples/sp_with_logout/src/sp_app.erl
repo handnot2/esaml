@@ -19,9 +19,9 @@ start(_Type, _Args) ->
             {"/saml/:operation", sp_handler, []}
         ]}
     ]),
-    {ok, _} = cowboy:start_http(http, 100, [{port, 8080}], [
-        {env, [{dispatch, Dispatch}]}
-    ]),
+    {ok, _} = cowboy:start_clear(http, 100, #{ port => 8080
+                                             , env => #{dispatch => Dispatch}
+                                             }),
     sp_sup:start_link().
 
 stop(_State) ->
