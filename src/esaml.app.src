@@ -9,10 +9,7 @@
             inets,
             ssl,
             stdlib,
-            xmerl,
-            cowlib,
-            cowboy,
-            ranch
+            xmerl
         ]},
         {licenses, ["https://github.com/arekinath/esaml/blob/master/LICENSE"]},
         {links, [
