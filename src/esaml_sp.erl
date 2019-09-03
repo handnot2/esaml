@@ -14,7 +14,7 @@
 
 -export([setup/1, generate_authn_request/2, generate_authn_request/3, generate_metadata/1]).
 -export([validate_assertion/2, validate_assertion/3]).
--export([generate_logout_request/3, generate_logout_request/4, generate_logout_response/3]).
+-export([generate_logout_request/4, generate_logout_request/5, generate_logout_response/3]).
 -export([validate_logout_request/2, validate_logout_response/2]).
 
 -type xml() :: #xmlElement{} | #xmlDocument{}.
@@ -76,16 +76,17 @@ generate_authn_request(IdpURL,
 
 %% @doc Return a LogoutRequest as an XML element
 %% @deprecated Use generate_logout_request/4
--spec generate_logout_request(IdpURL :: string(), NameID :: string(), esaml:sp()) -> #xmlElement{}.
-generate_logout_request(IdpURL, NameID, SP = #esaml_sp{}) ->
+-spec generate_logout_request(IdpURL :: string(), NameID :: string(), esaml:sp(), proplists:proplist()) -> #xmlElement{}.
+generate_logout_request(IdpURL, NameID, SP = #esaml_sp{}, Opts) ->
     SessionIndex = "",
     Subject = #esaml_subject{name = NameID},
-    generate_logout_request(IdpURL, SessionIndex, Subject, SP).
+    generate_logout_request(IdpURL, SessionIndex, Subject, SP, Opts).
 
 %% @doc Return a LogoutRequest as an XML element
--spec generate_logout_request(IdpURL :: string(), SessionIndex :: string(), esaml:subject(), esaml:sp()) -> #xmlElement{}.
-generate_logout_request(IdpURL, SessionIndex, Subject = #esaml_subject{}, SP = #esaml_sp{metadata_uri = _MetaURI})
+-spec generate_logout_request(IdpURL :: string(), SessionIndex :: string(), esaml:subject(), esaml:sp(), proplists:proplist()) -> #xmlElement{}.
+generate_logout_request(IdpURL, SessionIndex, Subject = #esaml_subject{}, SP = #esaml_sp{metadata_uri = _MetaURI}, Opts)
         when is_record(Subject, esaml_subject) ->
+		LogoutBinding = proplists:get_value(binding_type, Opts),
     Now = erlang:localtime_to_universaltime(erlang:localtime()),
     Stamp = esaml_util:datetime_to_saml(Now),
     Issuer = get_entity_id(SP),
@@ -99,7 +100,7 @@ generate_logout_request(IdpURL, SessionIndex, Subject = #esaml_subject{}, SP = #
                                        name_format = Subject#esaml_subject.name_format,
                                        session_index = SessionIndex,
                                        reason = user}),
-    if SP#esaml_sp.sp_sign_requests ->
+    if SP#esaml_sp.sp_sign_requests andalso LogoutBinding =:= post ->
         reorder_issuer(xmerl_dsig:sign(Xml, SP#esaml_sp.key, SP#esaml_sp.certificate));
     true ->
         add_xml_id(Xml)

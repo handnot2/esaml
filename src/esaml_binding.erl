@@ -9,10 +9,11 @@
 %% @doc SAML HTTP binding handlers
 -module(esaml_binding).
 
--export([decode_response/2, encode_http_redirect/4, encode_http_post/3, encode_http_post/4]).
+-export([decode_response/2, encode_http_redirect/5, encode_http_post/3, encode_http_post/4]).
 
 -include_lib("xmerl/include/xmerl.hrl").
 -define(deflate, <<"urn:oasis:names:tc:SAML:2.0:bindings:URL-Encoding:DEFLATE">>).
+-define(DEFAULT_SIG_ALG, <<"http://www.w3.org/2001/04/xmldsig-more#rsa-sha256">>).
 
 -type uri() :: binary() | string().
 -type html_doc() :: binary().
@@ -53,15 +54,54 @@ decode_response(_, SAMLResponse) ->
 %% @doc Encode a SAMLRequest (or SAMLResponse) as an HTTP-Redirect binding
 %%
 %% Returns the URI that should be the target of redirection.
--spec encode_http_redirect(IDPTarget :: uri(), SignedXml :: xml(), Username :: undefined | string(), RelayState :: binary()) -> uri().
-encode_http_redirect(IdpTarget, SignedXml, Username, RelayState) ->
-  Type = xml_payload_type(SignedXml),
-  Req = lists:flatten(xmerl:export([SignedXml], xmerl_xml)),
-  Param = http_uri:encode(base64:encode_to_string(zlib:zip(Req))),
-  RelayStateEsc = http_uri:encode(binary_to_list(RelayState)),
+%%
+%% It is compliant with https://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf (section 3.4.4.1).
+%% It strips the ds:Signature tag and based on it determines sign algorithm.
+-spec encode_http_redirect(IDPTarget :: uri(), SignedXml :: xml(), Username :: undefined | string(), RelayState :: binary(), Opts :: proplists:proplist()) -> uri().
+encode_http_redirect(IdpTarget, UnsignedXml0, Username, RelayState0, Opts) ->
+	PrivKey = proplists:get_value(key, Opts),
+  RelayState = binary_to_list(RelayState0),
+	SigAlg = ?DEFAULT_SIG_ALG,
+  ParamType = xml_payload_type(UnsignedXml0),
+	XmlCanon = lists:flatten(xmerl:export([UnsignedXml0], xmerl_xml)),
+  SamlParam = deflate_payload(XmlCanon),
+
+	ContentToBeSigned = iolist_to_binary([ParamType, "=", http_uri:encode(SamlParam), $&,
+																				"RelayState=", http_uri:encode(RelayState), $&,
+																				"SigAlg=", http_uri:encode(SigAlg)]),
+
+	Signature = sign(ContentToBeSigned, SigAlg, PrivKey),
+
   FirstParamDelimiter = case lists:member($?, IdpTarget) of true -> "&"; false -> "?" end,
-  Username_Part = redirect_username_part(Username),
-  iolist_to_binary([IdpTarget, FirstParamDelimiter, "SAMLEncoding=", ?deflate, "&", Type, "=", Param, "&RelayState=", RelayStateEsc | Username_Part]).
+  UsernamePart = redirect_username_part(Username),
+  iolist_to_binary([IdpTarget,
+										FirstParamDelimiter,
+										"SAMLEncoding=", ?deflate, $&,
+										ContentToBeSigned, $&,
+									  "Signature=", http_uri:encode(Signature),
+									  UsernamePart]).
+
+sign(Payload, SigMethod, Key) ->
+	DigestType = to_digest_type(SigMethod),
+	Signature = public_key:sign(Payload, DigestType, Key),
+  base64:encode(Signature).
+
+deflate_payload(Payload) -> base64:encode_to_string(zlib:zip(Payload)).
+
+to_digest_type(SigMethod) -> sha256. % TODO
+
+strip_signature(SignedXml) ->
+	[Signature] = xmerl_xpath:string("//ds:Signature", SignedXml, [{namespace, [{"ds", 'http://www.w3.org/2000/09/xmldsig#'}]}]),
+	SigAlg = get_sig_alg(Signature),
+	io:format("SigAlg is ~p", [SigAlg]),
+	{SigAlg, xmerl_dsig:strip(SignedXml)}.
+
+get_sig_alg(Signature) ->
+	#xmlObj{value = SigAlg} =
+	xmerl_xpath:string("string(/ds:Signature/ds:SignedInfo/ds:SignatureMethod/@Algorithm)",
+										 Signature,
+										 [{namespace, [{"ds", 'http://www.w3.org/2000/09/xmldsig#'}]}]),
+	SigAlg.
 
 redirect_username_part(Username) when is_binary(Username), size(Username) > 0 ->
   ["&username=", http_uri:encode(binary_to_list(Username))];
