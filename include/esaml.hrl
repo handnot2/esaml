@@ -107,7 +107,7 @@
 	idp_signs_envelopes = true :: boolean(),
 	idp_signs_logout_requests = true :: boolean(),
 	sp_sign_metadata = false :: boolean(),
-	trusted_fingerprints = [] :: [string() | binary()],
+	trusted_fingerprints = [] :: [string() | binary()] | any,
 	metadata_uri = "" :: string(),
 	consume_uri = "" :: string(),
 	logout_uri :: string() | undefined,
