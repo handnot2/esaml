@@ -122,7 +122,6 @@ start_ets() ->
                 ets:new(esaml_assertion_seen, [set, public, named_table]),
                 ets:new(esaml_privkey_cache, [set, public, named_table]),
                 ets:new(esaml_certbin_cache, [set, public, named_table]),
-                ets:new(esaml_idp_meta_cache, [set, public, named_table]),
                 ets_table_owner()
             end)};
         Pid -> {ok, Pid}
@@ -172,37 +171,27 @@ load_certificate_chain(CertPath) ->
             CertChain
     end.
 
-%% @doc Reads IDP metadata from a URL (or ETS memory cache) and validates the signature
+%% @doc Reads IDP metadata from a URL and validates the signature
 -spec load_metadata(Url :: string(), Fingerprints :: [string() | binary()]) -> esaml:idp_metadata().
 load_metadata(Url, FPs) ->
     Fingerprints = convert_fingerprints(FPs),
-    case ets:lookup(esaml_idp_meta_cache, Url) of
-        [{Url, Meta}] -> Meta;
-        _ ->
-            {ok, {{_Ver, 200, _}, _Headers, Body}} = httpc:request(get, {Url, []}, [{autoredirect, true}, {timeout, 3000}], []),
-            {Xml, _} = xmerl_scan:string(Body, [{namespace_conformant, true}]),
-            case xmerl_dsig:verify(Xml, Fingerprints) of
-                ok -> ok;
-                Err -> error(Err)
-            end,
-            {ok, Meta = #esaml_idp_metadata{}} = esaml:decode_idp_metadata(Xml),
-            ets:insert(esaml_idp_meta_cache, {Url, Meta}),
-            Meta
-    end.
+    {ok, {{_Ver, 200, _}, _Headers, Body}} = httpc:request(get, {Url, []}, [{autoredirect, true}, {timeout, 3000}], []),
+    {Xml, _} = xmerl_scan:string(Body, [{namespace_conformant, true}]),
+    case xmerl_dsig:verify(Xml, Fingerprints) of
+        ok -> ok;
+        Err -> error(Err)
+    end,
+    {ok, Meta = #esaml_idp_metadata{}} = esaml:decode_idp_metadata(Xml),
+    Meta.
 
-%% @doc Reads IDP metadata from a URL (or ETS memory cache)
+%% @doc Reads IDP metadata from a URL
 -spec load_metadata(Url :: string()) -> esaml:idp_metadata().
 load_metadata(Url) ->
-    case ets:lookup(esaml_idp_meta_cache, Url) of
-        [{Url, Meta}] -> Meta;
-        _ ->
-            Timeout = application:get_env(esaml, load_metadata_timeout, 15000),
-            {ok, {{_Ver, 200, _}, _Headers, Body}} = httpc:request(get, {Url, []}, [{autoredirect, true}, {timeout, Timeout}], []),
-            {Xml, _} = xmerl_scan:string(Body, [{namespace_conformant, true}]),
-            {ok, Meta = #esaml_idp_metadata{}} = esaml:decode_idp_metadata(Xml),
-            ets:insert(esaml_idp_meta_cache, {Url, Meta}),
-            Meta
-    end.
+    Timeout = application:get_env(esaml, load_metadata_timeout, 15000),
+    {ok, {{_Ver, 200, _}, _Headers, Body}} = httpc:request(get, {Url, []}, [{autoredirect, true}, {timeout, Timeout}], []),
+    {Xml, _} = xmerl_scan:string(Body, [{namespace_conformant, true}]),
+    {ok, Meta = #esaml_idp_metadata{}} = esaml:decode_idp_metadata(Xml),
+    Meta.
 
 %% @doc Checks for a duplicate assertion using ETS tables in memory on all available nodes.
 %%
