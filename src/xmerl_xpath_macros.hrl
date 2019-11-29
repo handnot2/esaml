@@ -50,6 +50,17 @@
         end
     end).
 
+-define(xpath_text_mult(XPath, Record, Field, TransFun),
+    fun(Resp) ->
+        case xmerl_xpath:string(XPath, Xml, [{namespace, Ns}]) of
+            [] ->
+                Resp;
+            XmlTexts ->
+                V = lists:map(fun(XmlText) -> TransFun(XmlText#xmlText.value) end, XmlTexts),
+                Resp#Record{Field = V}
+        end
+    end).
+
 -define(xpath_recurse(XPath, Record, Field, F),
     fun(Resp) ->
         case xmerl_xpath:string(XPath, Xml, [{namespace, Ns}]) of
