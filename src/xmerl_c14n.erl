@@ -26,7 +26,7 @@
 canon_name(Ns, Name, Nsp) ->
     NsPartRaw = case Ns of
         empty -> Nsp#xmlNamespace.default;
-        [] -> 
+        [] ->
             if Nsp == [] -> 'urn:oasis:names:tc:SAML:2.0:assertion';
                true -> Nsp#xmlNamespace.default
             end;
@@ -102,7 +102,7 @@ needed_ns(#xmlElement{nsinfo = NsInfo, attributes = Attrs}, InclNs) ->
     lists:foldl(fun(Attr, Needed) ->
         case Attr#xmlAttribute.nsinfo of
             {"xmlns", Prefix} ->
-                case lists:member(Prefix, InclNs) of
+                case lists:member(Prefix, InclNs) and not lists:member(Prefix, Needed) of
                     true -> [Prefix | Needed];
                     _ -> Needed
                 end;
@@ -377,5 +377,10 @@ c14n_inclns_test() ->
 
     Target2 = "<foo:a xmlns:bar=\"urn:bar:\" xmlns:foo=\"urn:foo:\"><foo:b bar:nothing=\"something\">foo</foo:b></foo:a>",
     Target2 = c14n(Doc, false, ["bar"]).
+
+c14n_dont_dupe_ns_test() ->
+  {Doc, []} = xmerl_scan:string("<foo:a xmlns:foo=\"urn:foo:\"><foo:b xmlns:bar=\"urn:bar:\" bar:nothing=\"something\">foo</foo:b></foo:a>", [{namespace_conformant, true}]),
+  Target1 = "<foo:a xmlns:foo=\"urn:foo:\"><foo:b xmlns:bar=\"urn:bar:\" bar:nothing=\"something\">foo</foo:b></foo:a>",
+  Target1 = c14n(Doc, false, ["foo", "bar"]).
 
 -endif.
