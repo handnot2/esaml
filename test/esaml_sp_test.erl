@@ -26,6 +26,10 @@ validate_assertion_test_() ->
       {"inline key", fun() ->
         {Xml, SP} = build_sp("inline"),
         ?assertMatch({error,stale_assertion}, esaml_sp:validate_assertion(Xml, SP))
+      end},
+      {"local key", fun() ->
+        {Xml, SP} = build_sp("local"),
+        ?assertMatch({error,stale_assertion}, esaml_sp:validate_assertion(Xml, SP))
       end}
     ]
   }.
