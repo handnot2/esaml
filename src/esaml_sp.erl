@@ -299,19 +299,53 @@ decrypt_assertion(Xml, #esaml_sp{key = PrivateKey}) ->
     [EncryptedData] = xmerl_xpath:string("./xenc:EncryptedData", Xml, [{namespace, XencNs}]),
     [#xmlText{value = CipherValue64}] = xmerl_xpath:string("xenc:CipherData/xenc:CipherValue/text()", EncryptedData, [{namespace, XencNs}]),
     CipherValue = base64:decode(CipherValue64),
-    SymmetricKey = decrypt_key_info(EncryptedData, PrivateKey),
+    EncryptedKey = get_encrypted_key(EncryptedData, Xml),
+    SymmetricKey = decrypt_key(EncryptedKey, PrivateKey),
     [#xmlAttribute{value = Algorithm}] = xmerl_xpath:string("./xenc:EncryptionMethod/@Algorithm", EncryptedData, [{namespace, XencNs}]),
     AssertionXml = block_decrypt(Algorithm, SymmetricKey, CipherValue),
     {Assertion, _} = xmerl_scan:string(AssertionXml, [{namespace_conformant, true}]),
     Assertion.
 
 
-decrypt_key_info(EncryptedData, Key) ->
-    DsNs = [{"ds", 'http://www.w3.org/2000/09/xmldsig#'}],
+get_encrypted_key(EncryptedData, Xml) ->
+    Ns = [{namespace, [
+            {"ds", 'http://www.w3.org/2000/09/xmldsig#'},
+            {"xenc", 'http://www.w3.org/2001/04/xmlenc#'}
+        ]}],
+    [KeyInfo] = xmerl_xpath:string("./ds:KeyInfo", EncryptedData, Ns),
+    case xmerl_xpath:string("./xenc:EncryptedKey", KeyInfo, Ns) of
+        [EncryptedKey] ->
+            EncryptedKey;
+        [] ->
+            retrieve_encrypted_key(KeyInfo, Xml, Ns)
+    end.
+
+
+retrieve_encrypted_key(KeyInfo, Xml, Ns) ->
+    [#xmlAttribute{value = URI}] = xmerl_xpath:string("./ds:RetrievalMethod/@URI", KeyInfo, Ns),
+    case URI of
+        "#" ++ Id ->
+            [EncryptedKey] = xmerl_xpath:string("//xenc:EncryptedKey[@Id='" ++ Id ++ "']", Xml, Ns),
+            EncryptedKey;
+        _ ->
+            case application:get_env(esaml, retrieve_remote_key, fun default_retrieve_remote_key/1) of
+                Fun when is_function(Fun, 1) ->
+                    Fun(URI);
+
+                {M, F, A} ->
+                    erlang:apply(M, F, [URI | A])
+            end
+    end.
+
+
+default_retrieve_remote_key(_URI) ->
+    error("Retrieval of remote encrypted keys is not configured").
+
+
+decrypt_key(EncryptedKey, Key) ->
     XencNs = [{"xenc", 'http://www.w3.org/2001/04/xmlenc#'}],
-    [KeyInfo] = xmerl_xpath:string("./ds:KeyInfo", EncryptedData, [{namespace, DsNs}]),
-    [#xmlAttribute{value = Algorithm}] = xmerl_xpath:string("./xenc:EncryptedKey/xenc:EncryptionMethod/@Algorithm", KeyInfo, [{namespace, XencNs}]),
-    [#xmlText{value = CipherValue64}] = xmerl_xpath:string("./xenc:EncryptedKey/xenc:CipherData/xenc:CipherValue/text()", KeyInfo, [{namespace, XencNs}]),
+    [#xmlAttribute{value = Algorithm}] = xmerl_xpath:string("./xenc:EncryptionMethod/@Algorithm", EncryptedKey, [{namespace, XencNs}]),
+    [#xmlText{value = CipherValue64}] = xmerl_xpath:string("./xenc:CipherData/xenc:CipherValue/text()", EncryptedKey, [{namespace, XencNs}]),
     CipherValue = base64:decode(CipherValue64),
     decrypt(CipherValue, Algorithm, Key).
 
